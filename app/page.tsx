@@ -1,71 +1,153 @@
-import Image from "next/image";
-import Link from "next/link";
+'use client';
+
+import { useState, useRef, useEffect } from 'react';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <h1 className="text-4xl font-bold">VoiceVault</h1>
-        <p className="text-lg text-gray-600 dark:text-gray-400">
-          Record and save your voice to remote storage
-        </p>
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const [uploadStatus, setUploadStatus] = useState<'idle' | 'uploading' | 'success' | 'error'>('idle');
+  
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const statusTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <Link
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="/voice-recorder"
-          >
-            🎤 Start Recording
-          </Link>
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+      if (statusTimeoutRef.current) {
+        clearTimeout(statusTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const startRecording = async () => {
+    setUploadStatus('idle');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      });
+      
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        stream.getTracks().forEach(track => track.stop());
+        await uploadRecording(audioBlob);
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    }
+  };
+
+  const uploadRecording = async (audioBlob: Blob) => {
+    setUploadStatus('uploading');
+    
+    const formData = new FormData();
+    const fileName = `recording-${Date.now()}.webm`;
+    formData.append('audio', audioBlob, fileName);
+    
+    try {
+      const response = await fetch('/api/upload-recording', {
+        method: 'POST',
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        throw new Error('Upload failed');
+      }
+      
+      const data = await response.json();
+      console.log('Upload successful:', data);
+      setUploadStatus('success');
+    } catch (error) {
+      console.error('Upload error:', error);
+      setUploadStatus('error');
+    }
+    
+    statusTimeoutRef.current = setTimeout(() => {
+      setUploadStatus('idle');
+    }, 3000);
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getButtonContent = () => {
+    if (uploadStatus === 'uploading') {
+      return <span className="text-2xl animate-pulse">⏳</span>;
+    }
+    if (uploadStatus === 'success') {
+      return <span className="text-4xl">✅</span>;
+    }
+    if (uploadStatus === 'error') {
+      return <span className="text-4xl">❌</span>;
+    }
+    if (isRecording) {
+      return (
+        <div className="flex flex-col items-center">
+          <span className="text-2xl">⏹️</span>
+          <span className="text-sm mt-1">{formatTime(recordingTime)}</span>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+      );
+    }
+    return <span className="text-3xl">🎤</span>;
+  };
+
+  const getButtonColor = () => {
+    if (uploadStatus === 'success') return 'bg-green-500 hover:bg-green-600';
+    if (uploadStatus === 'error') return 'bg-red-500 hover:bg-red-600';
+    if (isRecording) return 'bg-red-500 hover:bg-red-600 scale-110';
+    return 'bg-blue-500 hover:bg-blue-600';
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center min-h-screen">
+      <button 
+        onClick={isRecording ? stopRecording : startRecording}
+        className={`
+          relative w-32 h-32 rounded-full transition-all duration-300
+          ${getButtonColor()}
+          text-white font-bold text-lg
+          shadow-lg hover:shadow-xl
+          flex items-center justify-center
+        `}
+        disabled={uploadStatus === 'uploading'}
+      >
+        {getButtonContent()}
+      </button>
     </div>
   );
 }
