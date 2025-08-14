@@ -14,9 +14,12 @@ export async function POST(request: NextRequest) {
     }
 
     const fileName = `recordings/${Date.now()}-${file.name}`;
+    const bytes = await file.arrayBuffer();
+    const buffer = Buffer.from(bytes);
 
-    const blob = await put(fileName, file, {
+    const blob = await put(fileName, buffer, {
       access: 'public',
+      contentType: file.type || 'audio/webm',
     });
 
     return NextResponse.json({
